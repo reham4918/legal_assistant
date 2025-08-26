@@ -170,7 +170,8 @@ class LegalAssistant:
                 messages=[{"role": "user", "content": final_prompt}],
                 model=GROQ_MODEL_NAME,
                 temperature=0.1,
-                max_tokens=2048,
+                # ✨ --- تم زيادة الحد الأقصى للتوكنز هنا --- ✨
+                max_tokens=4096,
             )
             return chat_completion.choices[0].message.content
         except Exception as e:
