@@ -1,250 +1,161 @@
+# C:/Users/LENOVO/PycharmProjects/legal_assistant/split_by_article_v2.py
+
 # -*- coding: utf-8 -*-
 """
 الاستخدام:
-  1) تأكد من تثبيت المكتبات: pip install -U pypdf llama-index
-  2) ضع هذا الملف داخل مشروعك، والـ PDF في: data/Law_2004_14.pdf
-  3) شغّل: python split_by_article.py
-ينتج: data/qatar_labor_chunks.jsonl — سطر لكل مادة مع بيانات وصفية (metadata) جاهزة لـ RAG.
+  1) تأكد من تشغيل أوامر التثبيت النظيف في الطرفية (Terminal).
+  2) ضع ملف القانون المطلوب في مجلد: data/
+  3) شغّل: python split_by_article_v2.py
+ينتج: data/qatar_labor_chunks.jsonl — سطر لكل مادة مع بيانات وصفية (metadata) مبسطة ومخصصة.
 """
 
 import os
 import re
 import json
-from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Dict, Any
 
-# --- قراءة PDF (pypdf أولًا، ثم PyPDF2 كبديل) ---
+# --- التحقق من إصدار LlamaIndex ---
 try:
-    from pypdf import PdfReader
+    from llama_index.core import __version__ as llama_index_version
+    from packaging.version import Version
 
-    PDF_IMPL = "pypdf"
-except ImportError:
-    from PyPDF2 import PdfReader
+    if Version(llama_index_version) < Version("0.10.0"):
+        raise ImportError(
+            "هذا الكود يتطلب إصدار 0.10.0 أو أحدث من LlamaIndex. "
+            "يرجى التحديث باستخدام الأمر: pip install -U llama-index"
+        )
+except (ImportError, ModuleNotFoundError):
+    print("⚠️ لم يتم العثور على مكتبة `llama-index` أو `packaging`. يرجى تثبيتها: pip install -U llama-index packaging")
+    exit(1)
+# ------------------------------------
 
-    PDF_IMPL = "PyPDF2"
 
-# --- LlamaIndex Document ---
-from llama_index.core import Document
+# --- مكونات LlamaIndex الأساسية ---
+from llama_index.core import SimpleDirectoryReader
+from llama_index.core.schema import BaseNode, TextNode
+from llama_index.core.extractors import BaseExtractor
 
-# ----------- إعدادات ثابتة -----------
-PDF_PATH = "data/Law_2004_14.pdf"
+# -----------------------------------------------------------------
+
+# ----------- إعدادات ثابتة (تم التعديل للتركيز على ملف واحد) -----------
+PDF_FILE_PATH = "data/Law_2004_14(2).pdf"
 OUT_PATH = "data/qatar_labor_chunks.jsonl"
 
 LAW_ID = "قانون العمل القطري رقم (14) لسنة 2004"
-LAW_TITLE = "قانون العمل"
-LAW_YEAR = 2004
-JURISDICTION = "QA"
-DOC_TYPE = "qatar_labor_law_article"
-LANGUAGE = "ar"
 # ------------------------------------
 
-# --- تطبيع الأرقام الهندية إلى العربية ---
+# --- أدوات مساعدة ---
 ARABIC_INDIC = "٠١٢٣٤٥٦٧٨٩"
 WESTERN = "0123456789"
 DIGIT_MAP = {ord(a): b for a, b in zip(ARABIC_INDIC, WESTERN)}
 
 
 def normalize_digits(text: str) -> str:
+    """توحيد الأرقام الهندية إلى غربية."""
     return text.translate(DIGIT_MAP)
 
 
-# --- علامة لتتبّع أرقام الصفحات ---
-PAGE_MARK = "<<<PAGE:{}>>>"
-
-# --- Regex: بداية المادة + دعم (مكرر/إصدار) ---
+# --- التعابير النمطية (Regex) ---
 ART_PAT = re.compile(
     r"^\s*المادة\s*[\(（]?\s*([0-9٠-٩]+)\s*[\)）]?"
     r"(?:\s*[-–—/]*\s*(مكرر[0-9٠-٩]*|إصدار))?\b",
     re.MULTILINE
 )
-
-# --- Regex: عناوين الفصول (النسخة النهائية) ---
-# هذا التعبير يلتقط السطر الذي يبدأ بـ "الفصل" وكل ما يليه من نصوص
-# حتى يصل إلى بداية المادة التالية، مما يضمن التقاط العنوان فقط.
 CHAPTER_PAT = re.compile(r"^\s*الفصل.*?(?=\n\s*المادة|\Z)", re.MULTILINE | re.DOTALL)
 
 
-@dataclass
-class Article:
-    number: str
-    text: str
-    chapter_title: str
-    page_start: int
-    page_end: int
-    number_int: Optional[int] = None
-    is_bis: bool = False
-    article_label: str = ""
+# --- مستخرجات بيانات وصفية مخصصة (Custom Metadata Extractors) ---
 
-
-# ---------------- دوال مساعدة ----------------
-
-def load_pdf_with_page_marks(pdf_path: str) -> str:
-    """قراءة PDF صفحة بصفحة مع وسم بداية كل صفحة لالتقاط page_start/page_end بدقة."""
-    reader = PdfReader(pdf_path)
-    buf = []
-    for i, page in enumerate(reader.pages, start=1):
-        try:
-            page_text = page.extract_text() or ""
-        except Exception:
-            page_text = ""
-        buf.append(PAGE_MARK.format(i))
-        buf.append(normalize_digits(page_text))
-    return "\n".join(buf)
-
-
-def pages_in_span(span_text: str) -> Tuple[int, int]:
-    pages = [int(m.group(1)) for m in re.finditer(r"<<<PAGE:(\d+)>>>", span_text)]
-    return (min(pages), max(pages)) if pages else (1, 1)
-
-
-def last_chapter_before(text_upto_idx: str) -> str:
-    matches = list(CHAPTER_PAT.finditer(text_upto_idx))
-    return matches[-1].group(0).strip() if matches else ""
-
-
-def clean_span(span: str) -> str:
-    """تنظيف نص المادة: إزالة علامات الصفحات، فك تقطيع الكلمات، إزالة سطر 'الفصل...' إن التصق."""
-    t = span.replace("\r", "")
-    t = re.sub(r"<<<PAGE:\d+>>>", "", t)
-    # إزالة أي سطر فصل قد يلتصق داخل الجزء
-    t = CHAPTER_PAT.sub("", t)
-    # فك التقطيع: شرطة + سطر جديد
-    t = re.sub(r"-\s*\n", "", t)
-    # دمج كسور الكلمات الشائعة (حروف قبل/بعد الشرطة)
-    t = re.sub(r"(\w)-\n(\w)", r"\1\2", t)
-    # تنضيف مسافات زائدة
-    t = re.sub(r"[ \t]+\n", "\n", t)
-    t = re.sub(r"[ \t]{2,}", " ", t)
-    return t.strip()
-
-
-def parse_article_marker(m) -> tuple[Optional[int], bool, str]:
-    """من مطابق ART_PAT يُستخرج: (number_int, is_bis, article_label)."""
-    raw_num = (m.group(1) or "").strip()
-    suffix = (m.group(2) or "").strip()  # "مكرر..." أو "إصدار" أو ""
-    raw_num = normalize_digits(raw_num)
-    num_m = re.search(r"\d+", raw_num)
-    number_int = int(num_m.group(0)) if num_m else None
-    is_bis = suffix.startswith("مكرر")
-    label = f"المادة {raw_num}" + (f" {suffix}" if suffix else "")
-    return number_int, is_bis, label
-
-
-# ---------------- التقسيم إلى مواد ----------------
-
-def split_by_articles(full_text: str) -> List[Article]:
-    matches = list(ART_PAT.finditer(full_text))
-    articles: List[Article] = []
-
-    for idx, m in enumerate(matches):
-        number_int, is_bis, label = parse_article_marker(m)
-        start = m.start()
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(full_text)
-        span = full_text[start:end]
-
-        # --- التعديل النهائي هنا ---
-        # 1. استخلاص عنوان الفصل الخام
-        raw_chapter = last_chapter_before(full_text[:start])
-
-        # 2. تنظيف عنوان الفصل من الشوائب
-        if raw_chapter:
-            # إزالة علامات الصفحات
-            temp_chapter = re.sub(r"<<<PAGE:\d+>>>", "", raw_chapter)
-            # استبدال الأسطر الجديدة والمسافات الزائدة بمسافة واحدة
-            chapter = re.sub(r'\s+', ' ', temp_chapter).strip()
-        else:
-            chapter = ""
-        # --- نهاية التعديل ---
-
-        # 3. التعامل مع الحالات الخاصة (مواد الإصدار)
-        if not chapter and "إصدار" in label:
-            chapter = "مواد الإصدار"
-        elif not chapter:
-            chapter = "بدون فصل"
-
-        clean_text = clean_span(span)
-        p_start, p_end = pages_in_span(span)
-
-        articles.append(Article(
-            number=str(number_int) if number_int is not None else label,
-            text=clean_text,
-            chapter_title=chapter,
-            page_start=p_start,
-            page_end=p_end,
-            number_int=number_int,
-            is_bis=is_bis,
-            article_label=label
-        ))
-    return articles
-
-
-# -------------- تحويل إلى Documents --------------
-
-def articles_to_documents(articles: List[Article], source_file: str) -> List[Document]:
-    docs: List[Document] = []
-    for a in articles:
-        metadata = {
-            "law_id": LAW_ID,
-            "law_title": LAW_TITLE,
-            "law_year": LAW_YEAR,
-            "jurisdiction": JURISDICTION,
-            "language": LANGUAGE,
-            "chapter_title": a.chapter_title,
-            "article_number": a.number,  # كسلسلة (للإظهار)
-            "article_number_int": a.number_int,  # كقيمة عددية (للفلترة)
-            "is_bis": a.is_bis,
-            "article_label": a.article_label or f"المادة {a.number}",
-            "page_start": a.page_start,
-            "page_end": a.page_end,
-            "source_pdf": os.path.basename(source_file),
-            "doc_type": DOC_TYPE,
-        }
-        docs.append(Document(text=a.text, metadata=metadata))
-    return docs
-
-
-# -------------- التصدير إلى JSONL --------------
-
-def _num_key(meta: Dict[str, Any]) -> int:
-    n = meta.get("article_number_int", None)
-    return int(n) if isinstance(n, int) else 10 ** 9
-
-
-def export_nodes_to_jsonl(nodes: List[Document], out_path: str) -> Dict[str, Any]:
+class ChapterTitleExtractor(BaseExtractor):
     """
-    تقوم هذه الدالة بكتابة القائمة النهائية من المواد في ملف JSONL.
-    كل سطر في الملف يمثل مادة واحدة بصيغة JSON.
+    مستخرج مخصص لتحديد عنوان الفصل الذي تنتمي إليه كل مادة.
+    """
+    def extract(self, nodes: List[BaseNode]) -> List[Dict]:
+        metadata_list = []
+        for node in nodes:
+            text_before_node = node.metadata.get("text_before", "")
+            matches = list(CHAPTER_PAT.finditer(text_before_node))
+            raw_chapter = matches[-1].group(0).strip() if matches else ""
+
+            if raw_chapter:
+                chapter = re.sub(r'\s+', ' ', raw_chapter).strip()
+            else:
+                chapter = ""
+
+            metadata_list.append({"chapter_title": chapter})
+        return metadata_list
+
+    async def aextract(self, nodes: List[BaseNode]) -> List[Dict]:
+        return self.extract(nodes)
+
+
+class ArticleInfoExtractor(BaseExtractor):
+    """
+    مستخرج مخصص لتحليل بداية كل مادة للحصول على معلوماتها.
+    """
+    def extract(self, nodes: List[BaseNode]) -> List[Dict]:
+        metadata_list = []
+        for node in nodes:
+            match = ART_PAT.search(node.get_content())
+
+            if match:
+                raw_num = (match.group(1) or "").strip()
+                suffix = (match.group(2) or "").strip()
+                label = f"المادة {raw_num}" + (f" {suffix}" if suffix else "")
+
+                current_chapter = node.metadata.get("chapter_title", "")
+                if "إصدار" in label:
+                    final_chapter = "مواد الإصدار"
+                elif not current_chapter:
+                    final_chapter = "بدون فصل"
+                else:
+                    final_chapter = current_chapter
+
+                metadata_list.append({
+                    "article_label": label,
+                    "chapter_title": final_chapter
+                })
+            else:
+                metadata_list.append({
+                    "article_label": "N/A",
+                    "chapter_title": "N/A"
+                })
+        return metadata_list
+
+    async def aextract(self, nodes: List[BaseNode]) -> List[Dict]:
+        return self.extract(nodes)
+
+
+# --- دالة التصدير (تم تعديلها لإنشاء بيانات وصفية مبسطة) ---
+
+def export_nodes_to_jsonl(nodes: List[BaseNode], out_path: str) -> Dict[str, Any]:
+    """
+    تقوم بكتابة القائمة النهائية من العقد (Nodes) في ملف JSONL.
     """
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-    # فرز مستقر: رقم المادة (إن وجد) ثم is_bis ثم الصفحة
-    sorted_nodes = sorted(
-        nodes,
-        key=lambda n: (
-            _num_key(n.metadata),
-            1 if n.metadata.get("is_bis") else 0,
-            n.metadata.get("page_start", 0)
-        )
-    )
-
     with open(out_path, "w", encoding="utf-8") as f:
-        for i, n in enumerate(sorted_nodes, start=1):
-            meta = n.metadata
-
-            # استخدام article_label مباشرة لإنشاء ID واضح وموثوق
-            label = meta.get("article_label", f"المادة_{i}")
-            # تحويل "المادة 52 - مكرر" إلى "art_52_مكرر"
-            safe_id_part = re.sub(r'[\s\-/]+', '_', label.replace("المادة", "art"))
+        for i, node in enumerate(nodes, start=1):
+            full_meta = node.metadata
+            label = full_meta.get("article_label", f"المادة_{i}")
+            safe_id_part = re.sub(r'[\s\-/()（）]+', '_', label.replace("المادة", "art")).strip('_')
             chunk_id = f"QALaw2004-14_{safe_id_part}"
+
+            clean_text = node.get_content(metadata_mode="none").strip()
+            clean_text = re.sub(r"[ \t]{2,}", " ", clean_text)
+
+            # ✨ --- إنشاء قاموس بيانات وصفية مبسط --- ✨
+            # هنا نقوم باختيار الحقول المطلوبة فقط
+            minimal_metadata = {
+                "law_id": full_meta.get("law_id", "N/A"),
+                "chapter_title": full_meta.get("chapter_title", "N/A"),
+                "article_label": full_meta.get("article_label", "N/A"),
+            }
 
             rec = {
                 "chunk_id": chunk_id,
-                "text": n.text,
-                "metadata": {
-                    **meta,
-                    "chunk_index": 1,
-                    "chunks_in_article": 1,
-                }
+                "text": clean_text,
+                "metadata": minimal_metadata  # استخدام القاموس المبسط
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -252,46 +163,87 @@ def export_nodes_to_jsonl(nodes: List[Document], out_path: str) -> Dict[str, Any
         "articles": len(nodes),
         "chunks": len(nodes),
         "out_path": out_path,
-        "pdf_reader_impl": PDF_IMPL
     }
 
 
 # -------------------- main --------------------
 
 def main():
-    pdf_path = PDF_PATH
-    if not os.path.exists(pdf_path):
-        alt = pdf_path if pdf_path.lower().endswith(".pdf") else pdf_path + ".pdf"
-        if os.path.exists(alt):
-            pdf_path = alt
-        else:
-            print(f"❌ لم يتم العثور على ملف PDF عند: {PDF_PATH}")
-            return
+    # 1. تحميل المستند المحدد وتوحيد الأرقام
+    if not os.path.exists(PDF_FILE_PATH):
+        print(f"❌ خطأ: لم يتم العثور على الملف المحدد في المسار: {PDF_FILE_PATH}")
+        print("يرجى التأكد من وجود الملف وإعادة المحاولة.")
+        return
 
-    print(f"بدء معالجة ملف PDF: {pdf_path} ({PDF_IMPL}) ...")
-    full_text = load_pdf_with_page_marks(pdf_path)
+    print(f"📖 جاري قراءة ملف PDF المحدد: {PDF_FILE_PATH}...")
+    reader = SimpleDirectoryReader(input_files=[PDF_FILE_PATH])
+    raw_documents = reader.load_data(show_progress=True)
 
-    print(f"تقسيم النص إلى مواد باستخدام التعبير: {ART_PAT.pattern}")
-    articles = split_by_articles(full_text)
-    if not articles:
+    if not raw_documents:
+        print(f"❌ فشل تحميل الملف: '{PDF_FILE_PATH}'.")
+        return
+
+    full_text = "\n".join([doc.text for doc in raw_documents])
+
+    print("🔢 جاري تطبيع الأرقام في النص الكامل...")
+    full_text = normalize_digits(full_text)
+
+    # 2. التقسيم اليدوي الدقيق باستخدام Regex
+    print(f"📄 جاري تقسيم النص إلى مواد...")
+    matches = list(ART_PAT.finditer(full_text))
+
+    nodes = []
+    for idx, match in enumerate(matches):
+        start_idx = match.start()
+        end_idx = matches[idx + 1].start() if idx + 1 < len(matches) else len(full_text)
+        article_text = full_text[start_idx:end_idx]
+        node = TextNode(text=article_text.strip())
+        # إضافة البيانات المؤقتة اللازمة للمستخرجات فقط
+        node.metadata["text_before"] = full_text[:start_idx]
+        node.metadata["text_after"] = full_text[end_idx:]
+        nodes.append(node)
+
+    if not nodes:
         print("⚠️ لم يتم العثور على أي مادة. راجع ART_PAT أو تأكد من جودة استخراج النص.")
         return
 
-    print(f"تم العثور على {len(articles)} مادة. تحويلها إلى Documents...")
-    documents = articles_to_documents(articles, pdf_path)
+    print(f"✅ تم تقسيم النص إلى {len(nodes)} مادة.")
 
-    print(f"تصدير {len(documents)} مادة إلى JSONL: {OUT_PATH}")
-    stats = export_nodes_to_jsonl(documents, OUT_PATH)
+    # 3. تشغيل مستخرجات البيانات الوصفية
+    print("🔍 جاري استخراج البيانات الوصفية لكل مادة...")
+    chapter_extractor = ChapterTitleExtractor()
+    article_extractor = ArticleInfoExtractor()
+
+    chapter_metadata_list = chapter_extractor.extract(nodes)
+    for i, node in enumerate(nodes):
+        node.metadata.update(chapter_metadata_list[i])
+
+    article_metadata_list = article_extractor.extract(nodes)
+    for i, node in enumerate(nodes):
+        node.metadata.update(article_metadata_list[i])
+
+    # 4. إضافة البيانات الوصفية الثابتة (المطلوبة فقط)
+    print("🧹 جاري إضافة البيانات الوصفية النهائية...")
+    for node in nodes:
+        node.metadata.update({
+            "law_id": LAW_ID,
+        })
+
+    # 5. تصدير النتائج النهائية
+    print(f"💾 تصدير {len(nodes)} مادة إلى JSONL: {OUT_PATH}")
+    stats = export_nodes_to_jsonl(nodes, OUT_PATH)
 
     # ملخص
-    print("\n--- اكتملت المعالجة ---")
-    print(f"  مكتبة قراءة PDF: {stats['pdf_reader_impl']}")
+    print("\n--- ✅ اكتملت المعالجة بنجاح ---")
     print(f"  عدد المواد: {stats['articles']}")
     print(f"  إجمالي الـ Chunks: {stats['chunks']}")
     print(f"  ملف الخرج: {stats['out_path']}")
-    if documents:
-        print("— مثال Metadata لأول مادة —")
-        print(json.dumps(documents[0].metadata, ensure_ascii=False, indent=2))
+    if nodes:
+        print("\n— مثال Metadata لأول مادة (تم تبسيطها) —")
+        # طباعة مثال من الملف الناتج مباشرة للتأكيد
+        with open(OUT_PATH, 'r', encoding='utf-8') as f:
+            first_line = f.readline()
+            print(json.dumps(json.loads(first_line)['metadata'], ensure_ascii=False, indent=2))
     print("---------------------------\n")
 
 
