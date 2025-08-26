@@ -11,65 +11,163 @@
     <style>
         body {
             font-family: 'Tajawal', sans-serif;
-            background-color: #f8f9fa;
+            background-color: #f0f2f5;
         }
-        .container {
+        .chat-container {
             max-width: 800px;
+            margin: 2rem auto;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            height: 85vh;
         }
-        .card {
-            border: none;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-        .btn-primary {
+        .chat-header {
             background-color: #5a2d82;
-            border-color: #5a2d82;
+            color: white;
+            padding: 1rem;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            text-align: center;
         }
-        .btn-primary:hover {
-            background-color: #482469;
-            border-color: #482469;
+        .chat-box {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
         }
-        #loading {
+        .chat-message {
+            margin-bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-message .message-bubble {
+            padding: 0.75rem 1.25rem;
+            border-radius: 18px;
+            max-width: 80%;
+            line-height: 1.6;
+        }
+        /* --- ✨ تم تصحيح هذا الجزء --- */
+        .user-message {
+            align-items: flex-end; /* رسائل المستخدم على اليمين */
+        }
+        .user-message .message-bubble {
+            background-color: #e9ecef;
+            color: #333;
+            border-bottom-right-radius: 4px;
+        }
+        .ai-message {
+            align-items: flex-start; /* رسائل المساعد على اليسار */
+        }
+        .ai-message .message-bubble {
+            background-color: #5a2d82;
+            color: white;
+            border-bottom-left-radius: 4px;
+        }
+        /* --- نهاية الجزء المصحح --- */
+        .chat-input-area {
+            padding: 1rem;
+            border-top: 1px solid #ddd;
+        }
+        .typing-indicator {
             display: none;
+            padding: 0.5rem 1.5rem;
+            color: #6c757d;
+        }
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            margin: 0 2px;
+            background-color: #6c757d;
+            border-radius: 50%;
+            display: inline-block;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1.0); }
         }
     </style>
 </head>
 <body>
-    <div class="container my-5">
-        <div class="card p-4">
-            <div class="card-body">
-                <div class="text-center mb-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="#5a2d82" class="bi bi-briefcase-fill" viewBox="0 0 16 16">
-                        <path d="M6.5 1A1.5 1.5 0 0 0 5 2.5V3h6v-.5A1.5 1.5 0 0 0 9.5 1h-3z"/>
-                        <path d="M0 4.5A1.5 1.5 0 0 1 1.5 3h13A1.5 1.5 0 0 1 16 4.5v8a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 12.5v-8zM5 8h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1z"/>
-                    </svg>
-                    <h1 class="h3 mt-3">مساعد قانون العمل القطري الذكي</h1>
-                    <p class="text-muted">أدخل وصف الحالة للحصول على تحليل قانوني فوري</p>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h4 class="mb-0">مساعد قانون العمل القطري الذكي</h4>
+        </div>
+        <div class="chat-box" id="chat-box">
+            <div class="chat-message ai-message">
+                <div class="message-bubble">
+                    أهلاً بك! أنا مساعدك القانوني. كيف يمكنني مساعدتك اليوم؟
                 </div>
-                <form action="/analyze" method="post" onsubmit="showLoading()">
-                    <div class="mb-3">
-                        <label for="query" class="form-label">نص القضية:</label>
-                        <textarea class="form-control" id="query" name="query" rows="8" required placeholder="مثال: تم فصلي من العمل بسبب الغياب لمدة ٨ أيام متصلة دون تقديم عذر..."></textarea>
-                    </div>
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg">
-                            <span id="button-text">تحليل الحالة</span>
-                            <div id="loading" class="spinner-border spinner-border-sm" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                        </button>
-                    </div>
-                </form>
-                {% if error %}
-                    <div class="alert alert-danger mt-3">{{ error }}</div>
-                {% endif %}
             </div>
+        </div>
+        <div class="typing-indicator" id="typing-indicator">
+            المساعد يكتب... <span></span><span></span><span></span>
+        </div>
+        <div class="chat-input-area">
+            <form id="chat-form">
+                <div class="input-group">
+                    <input type="text" id="message-input" class="form-control" placeholder="اكتب رسالتك هنا..." autocomplete="off" required>
+                    <button class="btn btn-primary" type="submit">إرسال</button>
+                </div>
+            </form>
         </div>
     </div>
 
     <script>
-        function showLoading() {
-            document.getElementById('button-text').style.display = 'none';
-            document.getElementById('loading').style.display = 'inline-block';
+        const chatForm = document.getElementById('chat-form');
+        const messageInput = document.getElementById('message-input');
+        const chatBox = document.getElementById('chat-box');
+        const typingIndicator = document.getElementById('typing-indicator');
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userMessage = messageInput.value.trim();
+            if (!userMessage) return;
+
+            addMessage(userMessage, 'user');
+            messageInput.value = '';
+            typingIndicator.style.display = 'block';
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: userMessage }),
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const data = await response.json();
+                const formattedAiMessage = data.response.replace(/\n/g, '<br>');
+                addMessage(formattedAiMessage, 'ai');
+
+            } catch (error) {
+                console.error('Error:', error);
+                addMessage('عذراً، حدث خطأ ما. يرجى المحاولة مرة أخرى.', 'ai');
+            } finally {
+                typingIndicator.style.display = 'none';
+            }
+        });
+
+        function addMessage(message, sender) {
+            const messageWrapper = document.createElement('div');
+            // --- ✨ تم تصحيح المنطق هنا ---
+            messageWrapper.classList.add('chat-message', sender === 'user' ? 'user-message' : 'ai-message');
+
+            const messageBubble = document.createElement('div');
+            messageBubble.classList.add('message-bubble');
+            messageBubble.innerHTML = message; // Use innerHTML to render <br> tags
+
+            messageWrapper.appendChild(messageBubble);
+            chatBox.appendChild(messageWrapper);
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
     </script>
 </body>
