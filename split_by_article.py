@@ -38,7 +38,7 @@ from llama_index.core.extractors import BaseExtractor
 # -----------------------------------------------------------------
 
 # ----------- إعدادات ثابتة (تم التعديل للتركيز على ملف واحد) -----------
-PDF_FILE_PATH = "data/Law_2004_14(2).pdf"
+PDF_FILE_PATH = "data/Law_2004_14.pdf"
 OUT_PATH = "data/qatar_labor_chunks.jsonl"
 
 LAW_ID = "قانون العمل القطري رقم (14) لسنة 2004"
