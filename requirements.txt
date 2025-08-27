@@ -1,0 +1,28 @@
+# Core web framework
+flask>=2.3.0
+
+# Vector database and LlamaIndex integration
+chromadb>=0.4.0
+llama-index-vector-stores-chroma>=0.1.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Sentence transformers and LlamaIndex integration
+sentence-transformers>=2.2.0
+torch>=2.0.0
+llama-index-embeddings-huggingface>=0.2.0
+
+# Groq API client
+groq>=0.4.0
+
+# LlamaIndex Core
+llama-index>=0.10.0
+
+# Utility libraries
+packaging>=23.0
+markdown2>=2.4.0
+tqdm>=4.65.0
+
+# Optional: For better performance with transformers
+accelerate>=0.20.0
