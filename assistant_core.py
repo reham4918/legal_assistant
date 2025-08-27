@@ -132,7 +132,7 @@ class LegalAssistant:
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         self.collection = client.get_or_create_collection(
             name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"}  # Specify cosine distance
+            metadata={"hnsw:space": "l2"}
         )
         self.distance_metric = (self.collection.metadata or {}).get("hnsw:space", "l2")
         print(f"✅ Database is ready. (Distance metric: {self.distance_metric})")
