@@ -15,7 +15,7 @@ from sentence_transformers import SentenceTransformer
 from groq import Groq
 
 # --- Load environment variables from the .env file ---
-load_dotenv()
+load_dotenv(override=True)
 
 # --- Core Configuration ---
 CHROMA_PATH = "chroma_db"
