@@ -1,110 +1,117 @@
 # -*- coding: utf-8 -*-
 """
-الاستخدام:
-  1) تأكد من وجود ملف data/qatar_labor_chunks.jsonl.
-  2) قم بتثبيت المكتبات اللازمة: pip install sentence-transformers torch tqdm
-  3) قم بتشغيل هذا الكود: python step2_create_embeddings.py
+Usage:
+  1) Ensure the 'data/qatar_labor_chunks.jsonl' file exists.
+  2) Install the required libraries: pip install sentence-transformers torch tqdm
+  3) Run this script: python step2_create_embeddings.py
 
-سيقوم هذا الكود بإنشاء ملف جديد باسم qatar_labor_embeddings.jsonl في مجلد data.
-هذا الملف سيحتوي على نفس بيانات الملف الأصلي، مع إضافة حقل "embedding" لكل مادة قانونية.
+This script will generate a new file named 'qatar_labor_embeddings.jsonl' in the 'data' directory.
+This new file will contain the same data as the source file, but with an added "embedding"
+field for each legal article chunk.
 """
 
+# --- Core Libraries ---
 import json
 import os
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
-# --- الإعدادات الرئيسية ---
+# --- Configuration ---
 
-# المسار إلى ملف البيانات المصدر
+# Path to the source data file containing the text chunks.
 INPUT_PATH = "data/qatar_labor_chunks.jsonl"
-# المسار الذي سيتم حفظ الملف الجديد فيه
+# Path where the new file with embeddings will be saved.
 OUTPUT_PATH = "data/qatar_labor_embeddings.jsonl"
 
-# اسم الموديل المستخدم لتوليد الـ embeddings
-# هذا الموديل (bge-m3-law) هو نسخة معدلة من BGE-M3
-# وتم تخصيصها للنصوص القانونية، مما يجعلها خياراً ممتازاً لمشروعنا.
+# The name of the model used to generate embeddings.
+# This model (bge-m3-law) is a fine-tuned version of BGE-M3,
+# specifically adapted for legal texts, making it an excellent choice for this project.
 MODEL_NAME = 'mhaseeb1604/bge-m3-law'
 
 
-# --- دوال مساعدة ---
+# --- Helper Functions ---
 
 def load_chunks(file_path: str) -> list[dict]:
     """
-    تقوم هذه الدالة بقراءة ملف JSONL الذي يحتوي على المواد القانونية.
+    Reads a JSONL file containing the legal article chunks.
     """
+    # Check if the input file exists before attempting to open it.
     if not os.path.exists(file_path):
-        print(f"❌ خطأ: لم يتم العثور على الملف {file_path}.")
-        print("يرجى التأكد من أن الملف موجود في المسار الصحيح.")
+        print(f"❌ Error: File not found at {file_path}.")
+        print("Please make sure the file exists in the correct path.")
         return []
 
+    # Open the file and load each line as a separate JSON object.
     with open(file_path, 'r', encoding='utf-8') as f:
         return [json.loads(line) for line in f]
 
 
 def save_chunks_with_embeddings(file_path: str, data: list[dict]):
     """
-    تقوم هذه الدالة بحفظ المواد القانونية مع الـ embeddings الخاصة بها في ملف JSONL جديد.
+    Saves the list of chunks, now including their embeddings, to a new JSONL file.
     """
-    # التأكد من وجود مجلد data
+    # Ensure the output directory ('data/') exists.
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
+    # Write each dictionary item as a new line in the JSONL file.
     with open(file_path, 'w', encoding='utf-8') as f:
         for item in data:
-            # نستخدم ensure_ascii=False للحفاظ على النصوص العربية بدون ترميز
+            # Use ensure_ascii=False to correctly handle Arabic characters.
             f.write(json.dumps(item, ensure_ascii=False) + '\n')
 
 
-# --- الدالة الرئيسية ---
+# --- Main Execution Logic ---
 
 def main():
     """
-    الدالة الرئيسية التي تنظم سير عمل البرنامج:
-    1. تحميل المواد القانونية من الملف.
-    2. تهيئة موديل الـ embeddings.
-    3. توليد الـ embeddings للنصوص.
-    4. إضافة الـ embeddings إلى البيانات وحفظها في ملف جديد.
+    The main function that orchestrates the script's workflow:
+    1. Load the legal article chunks from the source file.
+    2. Initialize the sentence-transformer embedding model.
+    3. Generate embeddings for the text of each chunk.
+    4. Add the embeddings to the data and save it to a new file.
     """
-    # 1. تحميل البيانات
-    print(f"📖 جاري تحميل المواد من ملف: {INPUT_PATH}...")
+    # Step 1: Load the data from the JSONL file.
+    print(f"📖 Loading chunks from: {INPUT_PATH}...")
     chunks = load_chunks(INPUT_PATH)
     if not chunks:
         return
-    print(f"✅ تم تحميل {len(chunks)} مادة بنجاح.")
+    print(f"✅ Successfully loaded {len(chunks)} chunks.")
 
-    # 2. تهيئة موديل الـ embeddings
-    print(f"🧠 جاري تهيئة موديل الـ embeddings المتخصص: '{MODEL_NAME}'...")
-    print("(قد يستغرق هذا بعض الوقت في المرة الأولى لتحميل الموديل)")
+    # Step 2: Initialize the specialized sentence-transformer model.
+    print(f"🧠 Initializing the embedding model: '{MODEL_NAME}'...")
+    print("(This may take some time during the first run to download the model)")
     model = SentenceTransformer(MODEL_NAME)
-    print("✅ تم تهيئة الموديل بنجاح.")
+    print("✅ Model initialized successfully.")
 
-    # 3. توليد الـ embeddings
-    # نستخلص جميع النصوص لمعالجتها دفعة واحدة (batch processing) لزيادة الكفاءة
+    # Step 3: Generate embeddings for all text chunks.
+    # Extract all text content to be processed in a single batch for efficiency.
     texts_to_embed = [chunk['text'] for chunk in chunks]
-    print(f"⏳ جاري توليد الـ embeddings لـ {len(texts_to_embed)} نص...")
+    print(f"⏳ Generating embeddings for {len(texts_to_embed)} text chunks...")
 
-    # يقوم الموديل بتحويل قائمة النصوص إلى قائمة من الـ embeddings
+    # The model converts the list of texts into a list of embedding vectors.
     embeddings = model.encode(
         texts_to_embed,
-        show_progress_bar=True,  # لعرض شريط تقدم
-        convert_to_tensor=False  # للحصول على numpy array يمكن تحويله بسهولة إلى قائمة
+        show_progress_bar=True,  # Display a progress bar in the console.
+        convert_to_tensor=False  # Output as a numpy array for easier handling.
     )
-    print("✅ تم توليد الـ embeddings بنجاح.")
+    print("✅ Embeddings generated successfully.")
 
-    # 4. إضافة الـ embeddings إلى البيانات وحفظها
-    print(f"💾 جاري إضافة الـ embeddings وحفظ الملف الجديد في: {OUTPUT_PATH}...")
-    for i, chunk in enumerate(tqdm(chunks, desc="تحديث البيانات")):
-        # يجب تحويل الـ embedding إلى قائمة عادية (list) لتكون متوافقة مع صيغة JSON
+    # Step 4: Add embeddings to the data and save the new file.
+    print(f"💾 Adding embeddings and saving the new file to: {OUTPUT_PATH}...")
+    for i, chunk in enumerate(tqdm(chunks, desc="Updating data")):
+        # The numpy array must be converted to a standard list to be JSON serializable.
         chunk['embedding'] = embeddings[i].tolist()
 
     save_chunks_with_embeddings(OUTPUT_PATH, chunks)
 
-    print("\n--- ✨ اكتملت العملية بنجاح ✨ ---")
-    print(f"  - تم إنشاء embeddings لـ {len(chunks)} مادة.")
-    print(f"  - تم حفظ الملف الجديد في: {OUTPUT_PATH}")
+    # --- Final Summary ---
+    print("\n--- ✨ Process Completed Successfully ✨ ---")
+    print(f"  - Created embeddings for {len(chunks)} chunks.")
+    print(f"  - New file saved at: {OUTPUT_PATH}")
     print("-------------------------------------\n")
-    print(f"🚀 أنت الآن جاهز لتشغيل `step3_load_to_chroma.py` لتحميل البيانات إلى قاعدة البيانات المتجهة.")
+    print("🚀 You are now ready to run `step3_load_to_chroma.py` to load the data into the vector database.")
 
 
+# --- Script Entry Point ---
 if __name__ == "__main__":
     main()

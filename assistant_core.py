@@ -1,12 +1,11 @@
-# C:/Users/LENOVO/PycharmProjects/legal_assistant/assistant_core.py
-
 # -*- coding: utf-8 -*-
 """
 assistant_core.py
 
-هذا الملف يحتوي على المنطق الأساسي للمساعد القانوني.
-تم فصل هذا المنطق في كلاس واحد (`LegalAssistant`) لتجنب تكرار الكود
-وتسهيل الصيانة والتطوير لكل من واجهة سطر الأوامر (CLI) وواجهة الويب (Flask).
+This file contains the core logic for the legal assistant.
+This logic has been encapsulated into a single class (`LegalAssistant`) to avoid
+code duplication and to facilitate maintenance and development for both the
+command-line interface (CLI) and the web interface (Flask).
 """
 
 import os
@@ -15,20 +14,19 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from groq import Groq
 
-# --- تحميل متغيرات البيئة من ملف .env ---
+# --- Load environment variables from the .env file ---
 load_dotenv()
 
-# --- الإعدادات الرئيسية ---
+# --- Core Configuration ---
 CHROMA_PATH = "chroma_db"
 COLLECTION_NAME = "qatar_labor_law"
 EMBEDDING_MODEL_NAME = 'mhaseeb1604/bge-m3-law'
 N_RESULTS = 10
-# ⚠️ تنبيه: هذا النموذج غير موجود على Groq وسيسبب خطأ.
-# بناءً على طلبك، تم إبقاؤه كما هو.
-# للحصول على نتائج، يجب تغييره إلى موديل صالح مثل 'llama3-70b-8192'.
 GROQ_MODEL_NAME = 'openai/gpt-oss-20b'
 
-# --- قالب الأوامر (System Prompt) لـ Groq (تم تحسينه بفرض سلسلة تفكير ومراجعة ذاتية) ---
+# --- System Prompt Template for Groq (Optimized with Chain-of-Thought and Self-Correction) ---
+# This prompt is intentionally left in Arabic as it directly instructs the LLM
+# on how to generate the final, user-facing output in Arabic.
 SYSTEM_PROMPT_TEMPLATE = """
 أنت "مساعد قانوني دقيق ومُحلل" متخصص حصراً في قانون العمل القطري. مهمتك هي تقديم تحليل قانوني مفصل ومتسق وخالٍ من التناقضات.
 
@@ -99,56 +97,68 @@ SYSTEM_PROMPT_TEMPLATE = """
 
 class LegalAssistant:
     """
-    كلاس يغلف كل منطق المساعد القانوني، من تحميل النماذج إلى تحليل الاستعلامات.
+    A class that encapsulates all the logic for the legal assistant,
+    from loading models to analyzing queries.
     """
 
     def __init__(self):
         """
-        المنشئ (Constructor) يقوم بتهيئة وتحميل كل المكونات اللازمة مرة واحدة.
+        The constructor initializes and loads all necessary components once.
         """
-        print("🚀 جاري تهيئة المساعد القانوني الذكي...")
+        print("🚀 Initializing the Legal Assistant...")
         self._load_groq_client()
         self._load_embedding_model()
         self._connect_to_chromadb()
-        print("✅ المساعد القانوني جاهز للعمل.")
+        print("✅ Legal Assistant is ready.")
 
     def _load_groq_client(self):
-        """تحميل وتهيئة عميل Groq."""
-        print(f"🤖 جاري تهيئة عميل Groq مع موديل: {GROQ_MODEL_NAME}...")
+        """Loads and initializes the Groq client."""
+        print(f"🤖 Initializing Groq client with model: {GROQ_MODEL_NAME}...")
         groq_api_key = os.environ.get("GROQ_API_KEY")
         if not groq_api_key:
-            raise ValueError("لم يتم العثور على مفتاح GROQ_API_KEY في ملف .env. يرجى إضافته.")
+            raise ValueError("GROQ_API_KEY not found in .env file. Please add it.")
         self.groq_client = Groq(api_key=groq_api_key)
-        print("✅ تم تهيئة Groq بنجاح.")
+        print("✅ Groq client initialized successfully.")
 
     def _load_embedding_model(self):
-        """تحميل نموذج التضمين (Embedding Model)."""
-        print(f"🧠 جاري تحميل نموذج الـ Embedding من: {EMBEDDING_MODEL_NAME}...")
+        """Loads the sentence-transformer embedding model."""
+        print(f"🧠 Loading embedding model from: {EMBEDDING_MODEL_NAME}...")
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-        print("✅ تم تحميل نموذج الـ Embedding بنجاح.")
+        print("✅ Embedding model loaded successfully.")
 
     def _connect_to_chromadb(self):
-        """الاتصال بقاعدة بيانات ChromaDB والحصول على المجموعة."""
-        print(f"🧠 جاري الاتصال بقاعدة بيانات ChromaDB في: '{CHROMA_PATH}'...")
+        """Connects to the ChromaDB database and gets the collection."""
+        print(f"🧠 Connecting to ChromaDB at: '{CHROMA_PATH}'...")
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         self.collection = client.get_or_create_collection(
             name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine"}  # Specify cosine distance
         )
         self.distance_metric = (self.collection.metadata or {}).get("hnsw:space", "l2")
-        print(f"✅ قاعدة البيانات جاهزة. (مقياس المسافة المستخدم: {self.distance_metric})")
+        print(f"✅ Database is ready. (Distance metric: {self.distance_metric})")
         if self.distance_metric != "cosine":
-            print("⚠️ تحذير: قاعدة البيانات لا تستخدم 'cosine'. قد تكون النتائج غير دقيقة.")
+            print("⚠️ Warning: The collection is not using 'cosine' distance. Similarity scores might be inaccurate.")
 
     def _format_context_for_llm(self, results: dict) -> str:
-        """تنسيق نتائج البحث من ChromaDB إلى نص مفهوم للنموذج اللغوي."""
+        """
+        Formats the search results from ChromaDB into a string for the LLM.
+        The context labels are intentionally in Arabic to match the system prompt.
+        """
         context_parts = []
+        # Ensure we are accessing the first (and only) list of results
+        if not results or not results.get('documents') or not results['documents'][0]:
+            return "No context found."
+
         docs = results['documents'][0]
         metadatas = results['metadatas'][0]
         distances = results['distances'][0]
         ids = results['ids'][0]
 
         for i, (doc, meta, dist) in enumerate(zip(docs, metadatas, distances)):
+            # Convert distance to a similarity score.
+            # For cosine distance, similarity = 1 - distance.
+            # For L2 (Euclidean) distance, a common conversion is 1 - (dist^2 / 2),
+            # but cosine is preferred for this type of task.
             similarity = 1 - dist if self.distance_metric == "cosine" else (1 - (dist ** 2) / 2)
             source_id = ids[i]
             article_no = meta.get('article_label', 'N/A')
@@ -163,25 +173,26 @@ class LegalAssistant:
         return "\n---\n".join(context_parts)
 
     def _get_groq_analysis(self, user_query: str, context: str) -> str:
-        """إرسال السؤال والسياق إلى Groq للحصول على تحليل قانوني."""
+        """Sends the query and context to Groq to get a legal analysis."""
         try:
             final_prompt = SYSTEM_PROMPT_TEMPLATE.format(user_query=user_query, context=context)
             chat_completion = self.groq_client.chat.completions.create(
                 messages=[{"role": "user", "content": final_prompt}],
                 model=GROQ_MODEL_NAME,
                 temperature=0.1,
-                # ✨ --- تم زيادة الحد الأقصى للتوكنز هنا --- ✨
-                max_tokens=4096,
+                max_tokens=4096,  # Increased token limit for detailed analysis
             )
             return chat_completion.choices[0].message.content
         except Exception as e:
-            return f"❌ حدث خطأ أثناء الاتصال بـ Groq: {e}"
+            print(f"❌ An error occurred while contacting Groq: {e}")
+            return f"An error occurred while contacting the AI model: {e}"
 
     def analyze_case(self, user_query: str) -> str:
         """
-        الدالة الرئيسية للتحليل: تسترجع المواد ذات الصلة ثم تستخدم النموذج اللغوي للتحليل.
+        The main analysis function: retrieves relevant articles and then uses
+        the language model to generate an analysis.
         """
-        print(f"\n🔍 جاري استرجاع أفضل {N_RESULTS} مواد قانونية ذات صلة...")
+        print(f"\n🔍 Retrieving top {N_RESULTS} relevant legal articles...")
         query_embedding = self.embedding_model.encode(user_query).tolist()
         results = self.collection.query(
             query_embeddings=[query_embedding],
@@ -189,9 +200,9 @@ class LegalAssistant:
             include=['metadatas', 'documents', 'distances']
         )
 
-        context_str = self._format_context_for_llm(results) if results['documents'][0] else "لم يتم العثور على سياق."
+        context_str = self._format_context_for_llm(results)
 
-        print(f"🤖 جاري إرسال الحالة والسياق إلى {GROQ_MODEL_NAME} لاتخاذ القرار...")
+        print(f"🤖 Sending case and context to {GROQ_MODEL_NAME} for analysis...")
         analysis_result = self._get_groq_analysis(user_query, context_str)
 
         return analysis_result
