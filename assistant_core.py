@@ -12,7 +12,7 @@ import os
 import chromadb
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
-from groq import Groq
+from openai import OpenAI
 
 # --- Load environment variables from the .env file ---
 load_dotenv(override=True)
@@ -22,7 +22,8 @@ CHROMA_PATH = "chroma_db"
 COLLECTION_NAME = "qatar_labor_law"
 EMBEDDING_MODEL_NAME = 'mhaseeb1604/bge-m3-law'
 N_RESULTS = 10
-GROQ_MODEL_NAME = 'openai/gpt-oss-20b'
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL_NAME = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
 
 # --- System Prompt Template for Groq (Optimized with Chain-of-Thought and Self-Correction) ---
 # This prompt is intentionally left in Arabic as it directly instructs the LLM
@@ -106,19 +107,22 @@ class LegalAssistant:
         The constructor initializes and loads all necessary components once.
         """
         print("🚀 Initializing the Legal Assistant...")
-        self._load_groq_client()
+        self._load_openrouter_client()
         self._load_embedding_model()
         self._connect_to_chromadb()
         print("✅ Legal Assistant is ready.")
 
-    def _load_groq_client(self):
-        """Loads and initializes the Groq client."""
-        print(f"🤖 Initializing Groq client with model: {GROQ_MODEL_NAME}...")
-        groq_api_key = os.environ.get("GROQ_API_KEY")
-        if not groq_api_key:
-            raise ValueError("GROQ_API_KEY not found in .env file. Please add it.")
-        self.groq_client = Groq(api_key=groq_api_key)
-        print("✅ Groq client initialized successfully.")
+    def _load_openrouter_client(self):
+        """Loads and initializes the OpenRouter client."""
+        print(f"🤖 Initializing OpenRouter client with model: {OPENROUTER_MODEL_NAME}...")
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPERNROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY not found in .env file. Please add it.")
+        self.client = OpenAI(
+            base_url=OPENROUTER_BASE_URL,
+            api_key=api_key,
+        )
+        print("✅ OpenRouter client initialized successfully.")
 
     def _load_embedding_model(self):
         """Loads the sentence-transformer embedding model."""
@@ -172,19 +176,19 @@ class LegalAssistant:
             context_parts.append(context_item)
         return "\n---\n".join(context_parts)
 
-    def _get_groq_analysis(self, user_query: str, context: str) -> str:
-        """Sends the query and context to Groq to get a legal analysis."""
+    def _get_openrouter_analysis(self, user_query: str, context: str) -> str:
+        """Sends the query and context to OpenRouter to get a legal analysis."""
         try:
             final_prompt = SYSTEM_PROMPT_TEMPLATE.format(user_query=user_query, context=context)
-            chat_completion = self.groq_client.chat.completions.create(
+            chat_completion = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": final_prompt}],
-                model=GROQ_MODEL_NAME,
+                model=OPENROUTER_MODEL_NAME,
                 temperature=0.1,
                 max_tokens=4096,  # Increased token limit for detailed analysis
             )
             return chat_completion.choices[0].message.content
         except Exception as e:
-            print(f"❌ An error occurred while contacting Groq: {e}")
+            print(f"❌ An error occurred while contacting OpenRouter: {e}")
             return f"An error occurred while contacting the AI model: {e}"
 
     def analyze_case(self, user_query: str) -> str:
@@ -202,7 +206,7 @@ class LegalAssistant:
 
         context_str = self._format_context_for_llm(results)
 
-        print(f"🤖 Sending case and context to {GROQ_MODEL_NAME} for analysis...")
-        analysis_result = self._get_groq_analysis(user_query, context_str)
+        print(f"🤖 Sending case and context to {OPENROUTER_MODEL_NAME} for analysis...")
+        analysis_result = self._get_openrouter_analysis(user_query, context_str)
 
         return analysis_result

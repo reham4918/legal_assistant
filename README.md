@@ -27,11 +27,15 @@ legal_assistant/
 **Prerequisites:**
 - Python 3.8+
 - PDF file of Qatar Labor Law (placed in `data/` directory)
-- Groq API key (get from [Groq](https://console.groq.com/))
+- OpenRouter API key (get from [OpenRouter](https://openrouter.ai/))
 
 **Setup:**
 1. Install dependencies: `pip install -r requirements.txt`
-2. Create `.env` file with: `GROQ_API_KEY=your_groq_api_key_here`
+2. Create `.env` file with:
+   ```env
+   OPENROUTER_API_KEY=your_openrouter_api_key_here
+   OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
+   ```
 3. **Option A - Quick Start:** The processed data and ChromaDB database are already generated, so you can skip directly to:
    ```bash
    python app.py
@@ -129,14 +133,14 @@ python step3_load_to_chroma.py
 **Purpose:** Core logic for the legal assistant, handling retrieval and AI analysis.
 
 **Main Class: `LegalAssistant`**
-- `__init__()`: Initializes all components (Groq client, embedding model, ChromaDB)
+- `__init__()`: Initializes all components (OpenRouter client, embedding model, ChromaDB)
 - `analyze_case()`: Main analysis function that processes user queries
-- `_get_groq_analysis()`: Sends context to AI for legal analysis
+- `_get_openrouter_analysis()`: Sends context to AI for legal analysis
 - `_format_context_for_llm()`: Formats retrieved articles for the AI
 
 **Configuration:**
 - `EMBEDDING_MODEL_NAME`: Model for query embeddings
-- `GROQ_MODEL_NAME`: AI model for analysis
+- `OPENROUTER_MODEL_NAME`: AI model for analysis (configurable via `OPENROUTER_MODEL` in `.env`)
 - `TEMPERATURE`: Temperature for the LLM
 - `MAX_TOKENS`: Maximum number of tokens for the LLM
 - `N_RESULTS`: Number of articles to retrieve
